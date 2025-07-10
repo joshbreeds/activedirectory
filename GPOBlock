@@ -1,0 +1,84 @@
+Write-Host "Creating LogOnAsService GPOs for each server..." -ForegroundColor Yellow
+Import-Module GroupPolicy
+
+# Function to resolve the actual OU path for each server
+function Get-ServerTargetOU {
+    param (
+        [string]$ServerName,
+        [string]$ServiceOU
+    )
+
+    $ouFilter = if ($ServerName -like "*VVD*" -or $ServerName -like "*VVT*") {
+        "OU=Servers,OU=TEST"
+    } elseif ($ServerName -like "*VVL*") {
+        "OU=Servers,OU=LIVE"
+    } else {
+        "OU=Servers"
+    }
+
+    # Search below the provided $ServiceOU path
+    $fullOU = Get-ADOrganizationalUnit -LDAPFilter "(distinguishedName=*$ouFilter*)*" -SearchBase $ServiceOU -SearchScope Subtree | 
+              Where-Object { $_.DistinguishedName -like "*$ouFilter*" } |
+              Sort-Object DistinguishedName -Descending |
+              Select-Object -First 1
+
+    if ($null -eq $fullOU) {
+        throw "❌ Could not resolve target OU for server $ServerName using path $ouFilter below $ServiceOU"
+    }
+
+    return $fullOU.DistinguishedName
+}
+
+# Check if a GPO is already linked to an OU
+function Test-GPOLinked {
+    param (
+        [string]$GPOName,
+        [string]$OU
+    )
+    try {
+        $links = (Get-GPInheritance -Target $OU -ErrorAction Stop).GpoLinks
+        return $links | Where-Object { $_.DisplayName -eq $GPOName }
+    } catch {
+        Write-Host "⚠️ Failed to get GPO inheritance for $OU. Error: $_" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Create and link GPOs
+foreach ($ServerName in $ServerNamesArray) {
+    try {
+        $TargetOU = Get-ServerTargetOU -ServerName $ServerName -ServiceOU $ServiceOU
+        Write-Host "`n➡️ Working on server: $ServerName (Target OU: $TargetOU)" -ForegroundColor Cyan
+
+        $GPOLogOnAsService = "$ADServiceOU - $ServerName - LogOnAsService"
+
+        if (-not (Get-GPO -Name $GPOLogOnAsService -ErrorAction SilentlyContinue)) {
+            New-GPO -Name $GPOLogOnAsService | Out-Null
+            Write-Host "✅ Created GPO: $GPOLogOnAsService" -ForegroundColor Yellow
+        } else {
+            Write-Host "ℹ️ GPO $GPOLogOnAsService already exists." -ForegroundColor Yellow
+        }
+
+        # Link if not already linked
+        if (-not (Test-GPOLinked -GPOName $GPOLogOnAsService -OU $TargetOU)) {
+            New-GPLink -Name $GPOLogOnAsService -Target $TargetOU | Out-Null
+            Write-Host "🔗 Linked GPO $GPOLogOnAsService to $TargetOU" -ForegroundColor Green
+        } else {
+            Write-Host "🔄 GPO $GPOLogOnAsService is already linked to $TargetOU" -ForegroundColor Gray
+        }
+
+        # Update Security Filtering
+        Set-GPPermission -Name $GPOLogOnAsService -TargetName "Authenticated Users" -TargetType Group -PermissionLevel None
+
+        $ComputerObj = Get-ADComputer -Identity $ServerName -ErrorAction SilentlyContinue
+        if ($ComputerObj) {
+            Set-GPPermission -Name $GPOLogOnAsService -TargetName "$($ComputerObj.Name)$" -TargetType Computer -PermissionLevel GpoApply
+            Write-Host "✅ Added $($ComputerObj.Name)$ to security filtering for $GPOLogOnAsService" -ForegroundColor Green
+        } else {
+            Write-Host "⚠️ Could not find computer object for $ServerName. Skipping security filtering." -ForegroundColor DarkYellow
+        }
+
+    } catch {
+        Write-Host "❌ Error processing $ServerName: $_" -ForegroundColor Red
+    }
+}
