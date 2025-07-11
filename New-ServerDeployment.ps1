@@ -1,7 +1,7 @@
 # NAME: New-ADServerGroups.ps1
 # AUTHOR: Joshua Breeds - 03/07/2025
-# SYNOPSIS: Creates new service OUs/server AD security groups after VMWare deployment.
-# LAST EDIT: 07/07/2025
+# SYNOPSIS: Creates new service OUs/server AD security groups and LogOnAsService GPOs after VMWare deployment.
+# LAST EDIT: 11/07/2025
 
 Write-Host "Welcome to the New-ServerDeployment script!" -ForegroundColor Cyan
 Write-Host "This script will help you create the necessary AD groups/OUs for new servers or services." -ForegroundColor Cyan
@@ -20,6 +20,12 @@ if ($ServerCheck -eq 'Y') {
 
 # Ask for the Jira DP ticket number
 $TicketNumber = Read-Host "What is the Jira DP ticket number for this request? (Example: DP-123456)"
+if ($TicketNumber -match 'DP-\d{6}') {
+    Write-Host "You have entered a valid ticket number: $TicketNumber" -ForegroundColor Green
+} else {
+    Write-Host "Invalid ticket number format. Please enter a valid Jira DP ticket number (e.g., DP-123456)." -ForegroundColor Red
+    exit
+}
 
 # Has the service and related servers been added to CMDB?
 $CMDBCheck = Read-Host "Has the service and the new servers been added to CMDB? (Y/N)"
@@ -34,22 +40,22 @@ if ($CMDBCheck -eq 'Y') {
 }
 
 # Search AD for the OU of the service
-$ADServiceOU = Read-Host "What is the name of the service your server(s) are running? (Example: CROWN DMS, NICHE etc)"
+$ADServiceOU = Read-Host "What is the name of the service that your server(s) are running? (Example: CROWN DMS, NICHE etc)"
 $BaseOU = "OU=Servers,OU=Northumbria Police,OU=Data Management,DC=nbria,DC=police,DC=cjx,DC=gov,DC=uk"
 
 # Get the OU object(s) matching the name
 $ExistingOUs = Get-ADOrganizationalUnit -Filter "Name -like '*$ADServiceOU*'" -SearchBase $BaseOU -ErrorAction SilentlyContinue
 
 if ($ExistingOUs) {
-    Write-Host "Found the following OUs:"
+    Write-Host "Found the following Active Directory OUs under the Server OU:"
     $ExistingOUs | Select-Object Name, DistinguishedName | Format-Table -AutoSize
 } else {
     Write-Host "No matching OUs found for $ADServiceOU." -ForegroundColor Red
-    $createNewOU = Read-Host "Would you like to create a new OU for this service? (Y/N)"
-    if ($createNewOU -eq 'Y') {
+    $CreateNewOU = Read-Host "Would you like to create a new OU for this service? (Y/N)"
+    if ($CreateNewOU -eq 'Y') {
         # Creating a new OU structure
         Write-Host "Ok, let's create a new OU and sub OUs for this service..." -ForegroundColor Yellow
-        $NewOUName = Read-Host "What is the name the new OU for this service/application?"
+        $NewOUName = Read-Host "What is the name of the new OU for this service/application?"
         $ServiceOU = "OU=$NewOUName,$BaseOU"
 
         Write-Host "Building new OU structure..." -ForegroundColor Yellow
@@ -72,7 +78,7 @@ if ($ExistingOUs) {
                 Add-ADGroupMember -Identity "$NewOUName - OU Admins" -Members $SMEAdminArray
                 Write-Host "Added $($SMEAdminArray -join ', ') to $NewOUName - OU Admins group." -ForegroundColor Green
             } catch {
-                Write-Host "Failed to add one or more SME admins to $NewOUName - OU Admins group: $_" -ForegroundColor Red
+                Write-Host "Failed to add one or more SME admins to $NewOUName - OU Admins group: $_. OU Admins group may be configured incorrectly, please review in AD." -ForegroundColor Red
             }
         }
 
@@ -129,7 +135,7 @@ if ($ExistingOUs) {
                 Add-ADGroupMember -Identity "$NewOUName - OU Admins" -Members $SMEAdminArray
                 Write-Host "Added $($SMEAdminArray -join ', ') to $NewOUName - OU Admins group." -ForegroundColor Green
             } catch {
-                Write-Host "Failed to add one or more SME admins to $NewOUName - OU Admins group: $_" -ForegroundColor Red
+                Write-Host "Failed to add one or more SME admins to $NewOUName - OU Admins group: $_. OU Admins group may be configured incorrectly, please review in AD." -ForegroundColor Red
             }
         }
 
@@ -161,8 +167,18 @@ if ($ExistingOUs) {
 # Prompt for server names
 $ServerNames = Read-Host "What are the hostnames of the new servers you are deploying? (Example: Server1, Server2, Server3) - Separate multiple servers with a comma."
 $ServerNamesArray = $ServerNames -split ',\s*'
-Write-Host "You have entered the following server names: $($ServerNamesArray -join ', ')" -ForegroundColor Green
 
+# Validate server names
+$ServerNamesCheck = Read-Host "You have entered the following server names: $ServerNamesArray. Are these correct and free from typos? [Y/N]"
+if ($ServerNamesCheck -eq 'N') {
+    Write-Host "Please re-run the script and enter the correct server names." -ForegroundColor Red
+    exit
+} elseif ($ServerNamesCheck -ne 'Y') {
+    Write-Host "Invalid input. Please enter Y or N." -ForegroundColor Red
+    exit
+} else {
+    Write-Host "You have confirmed that the server names are correct." -ForegroundColor Green
+}
 # Create groups for each server
 Write-Host "Creating AD groups for each server..." -ForegroundColor Yellow
 foreach ($ServerName in $ServerNamesArray) {
@@ -239,106 +255,72 @@ $TargetOU = "OU=Servers,$ServiceOU"
 $ServerNames = $ServerNamesArray -join ', '                 
 Import-Module GroupPolicy
 
-# Decide OU path for each server
-function Get-ServerTargetOU {
-    param (
-        [string]$ServerName,
-        [string]$ServiceOU
-    )
+# Creates GPOs for each server
+foreach ($ServerName in $ServerNamesArray) {
+    # Determine the OU based on server name
     if ($ServerName -like "*VVD*" -or $ServerName -like "*VVT*") {
-        return "OU=Servers,OU=TEST,$ServiceOU"
+        $TargetOU = "OU=Servers,OU=TEST,$ServiceOU"
     } elseif ($ServerName -like "*VVL*") {
-        return "OU=Servers,OU=LIVE,$ServiceOU"
+        $TargetOU = "OU=Servers,OU=LIVE,$ServiceOU"
     } else {
-        return "OU=Servers,$ServiceOU"
+        Write-Host "Skipping GPO creation for $ServerName as it does not match expected patterns." -ForegroundColor Yellow
+        continue
     }
-}
 
-# Check if a GPO is already linked to an OU 
-function Test-GPOLinked {
-    param (
-        [string]$GPOName,
-        [string]$OU
-    )
-    $links = (Get-GPInheritance -Target $OU).GpoLinks
-    return $links | Where-Object { $_.DisplayName -eq $GPOName }
-}
+    # Check if the GPO already exists
+    $GPOName = "$ADServiceOU - $ServerName - LogOnAsService"
+    $ExistingGPO = Get-GPO -Name $GPOName -ErrorAction SilentlyContinue
+    if ($ExistingGPO) {
+        Write-Host "GPO '$GPOName' already exists." -ForegroundColor Yellow
+    } else {
+        # Create the new GPO
+        if ($CreateNewOU = 'Y') {
+            $GPOName = "$NewOUName - $ServerName - LogOnAsService"
+        } else {
+            $GPOName = "$ADServiceOU - $ServerName - LogOnAsService"
+        }
 
-# If a new OU was created earlier
-if ($createNewOU -eq 'Y' -or ($ExistingOUs -and $ouIndex -eq 'New')) {
-    Write-Host "Creating GPOs for each server in the new OU structure..." -ForegroundColor Yellow
-    foreach ($ServerName in $ServerNamesArray) {
-        $TargetOU = Get-ServerTargetOU -ServerName $ServerName -ServiceOU $ServiceOU
-        $GPOLogOnAsService = "$ADServiceOU - $ServerName - LogOnAsService"
+        Write-Host "Creating GPO: $GPOName" -ForegroundColor Yellow
+        $NewGPO = New-GPO -Name $GPOName -Comment "LogOnAsService GPO for $ServerName - $TicketNumber"
+        Write-Host "Created GPO: $GPOName" -ForegroundColor Green
 
-        foreach ($GPOName in @($GPOLogOnAsService)) {
-            # Create GPO if it doesn't exist
-            if (-not (Get-GPO -Name $GPOName -ErrorAction SilentlyContinue)) {
-                New-GPO -Name $GPOName | Out-Null
-                Write-Host "Created GPO: $GPOName" -ForegroundColor Yellow
-            } else {
-                Write-Host "GPO $GPOName already exists." -ForegroundColor Yellow
+        #Wait for GPO creation to propagate
+        Write-Host "If a new AD OU was created, please wait for the new AD OU to propagate to GPMC...Please allow a few mins..." -ForegroundColor Yellow
+
+        # Wait for the OU to be available in GPMC
+        $MaxAttempts= 15
+        $Delay = 60
+        $Success = $false
+
+        for ($i = 1; $i -le $MaxAttempts; $i++) {
+            try {
+                New-GPLink -Name $NewGPO.DisplayName -Target $TargetOU -LinkEnabled Yes -ErrorAction Stop
+                Write-Host "Successfully linked GPO '$GPOName' to OU '$TargetOU'." -ForegroundColor Green
+                $Success = $true
+                break
             }
-            # Always link the GPO to the relevant OU (even if already linked)
-            if (-not (Test-GPOLinked -GPOName $GPOName -OU $TargetOU)) {
-                New-GPLink -Name $GPOName -Target $TargetOU | Out-Null
-                Write-Host "Linked GPO $GPOName to $TargetOU" -ForegroundColor Green
-            } else {
-                Write-Host "GPO $GPOName is already linked to $TargetOU" -ForegroundColor Yellow
-            }
-
-            # Remove Authenticated Users from security filtering
-            Set-GPPermission -Name $GPOName -TargetName "Authenticated Users" -TargetType Group -PermissionLevel None
-
-            # Add the computer object to security filtering
-            $ComputerObj = Get-ADComputer -Identity $ServerName -ErrorAction SilentlyContinue
-            if ($ComputerObj) {
-                Set-GPPermission -Name $GPOName -TargetName "$($ComputerObj.Name)$" -TargetType Computer -PermissionLevel GpoApply
-                Write-Host "Added $($ComputerObj.Name)$ to security filtering for $GPOName." -ForegroundColor Green
-            } else {
-                Write-Host "Could not find computer object for $ServerName. Skipping security filtering." -ForegroundColor Yellow
+            catch {
+                Write-Host "Attempt $i of $MaxAttempts. Failed to link GPO '$GPOName' to OU '$TargetOU'. Retrying in $Delay seconds..." -ForegroundColor Red
+                Start-Sleep -Seconds $Delay
             }
         }
-    }
-} else {
-    # Existing OU path logic
-    Write-Host "Creating GPOs for each server in the existing OU structure..." -ForegroundColor Yellow
-    foreach ($ServerName in $ServerNamesArray) {
-        $TargetOU = Get-ServerTargetOU -ServerName $ServerName -ServiceOU $ServiceOU
-        $GPOLogOnAsService = "$ADServiceOU - $ServerName - LogOnAsService"
 
-        foreach ($GPOName in @($GPOLogOnAsService)) {
-            # Create GPO if it doesn't exist
-            if (-not (Get-GPO -Name $GPOName -ErrorAction SilentlyContinue)) {
-                New-GPO -Name $GPOName | Out-Null
-                Write-Host "Created GPO: $GPOName" -ForegroundColor Yellow
-            } else {
-                Write-Host "GPO $GPOName already exists." -ForegroundColor Yellow
-            }
-            # Always link the GPO to the relevant OU (even if already linked)
-            if (-not (Test-GPOLinked -GPOName $GPOName -OU $TargetOU)) {
-                New-GPLink -Name $GPOName -Target $TargetOU | Out-Null
-                Write-Host "Linked GPO $GPOName to $TargetOU" -ForegroundColor Green
-            } else {
-                Write-Host "GPO $GPOName is already linked to $TargetOU" -ForegroundColor Yellow
-            }
-
-            # Remove Authenticated Users from security filtering
-            Set-GPPermission -Name $GPOName -TargetName "Authenticated Users" -TargetType Group -PermissionLevel None
-
-            # Add the computer object to security filtering
-            $ComputerObj = Get-ADComputer -Identity $ServerName -ErrorAction SilentlyContinue
-            if ($ComputerObj) {
-                Set-GPPermission -Name $GPOName -TargetName "$($ComputerObj.Name)$" -TargetType Computer -PermissionLevel GpoApply
-                Write-Host "Added $($ComputerObj.Name)$ to security filtering for $GPOName." -ForegroundColor Green
-            } else {
-                Write-Host "Could not find computer object for $ServerName. Skipping security filtering." -ForegroundColor Yellow
-            }
+        if (-not $Success) {
+            Write-Host "Failed to link GPO '$GPOName' to OU '$TargetOU' after $MaxAttempts attempts. Proceeding anyway, GPOs may not be linked correctly." -ForegroundColor Red
         }
+
+        # Set security filtering to allow only the server AD object and remove Authenticated Users
+        $ComputerObj = Get-ADComputer -Identity $ServerName -ErrorAction SilentlyContinue
+        Set-GPPermission -Guid $NewGPO.Id -PermissionLevel None -TargetType Group -TargetName "Authenticated Users"
+        Set-GPPermission -Name $GPOName -TargetName "$($ComputerObj.Name)$" -TargetType Computer -PermissionLevel GpoApply
+        Write-Host "Set security filtering for GPO '$GPOName'." -ForegroundColor Green
     }
 }
 
-Write-Host "LogOnAsService GPOs created, security filtered, and linked to the correct OUs." -ForegroundColor Cyan
-
-# Final message
+# Final messages
+Write-Host "All GPOs have been created, security filtered and linked successfully." -ForegroundColor Green
+Write-Host "Please ensure you configure user rights assignment on the new GPOs with the Group Police Management Console." -ForegroundColor Yellow
+Write-Host "Don't forget to assign AD RDPUsers and ServerAdmins group to their respective local groups!" -ForegroundColor Yellow
 Write-Host "Thank you for using the New-ServerDeployment script!" -ForegroundColor Cyan
+
+
