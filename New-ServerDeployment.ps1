@@ -1,7 +1,7 @@
 # NAME: New-ADServerGroups.ps1
 # AUTHOR: Joshua Breeds - 03/07/2025
 # SYNOPSIS: Creates new service OUs/server AD security groups and LogOnAsService GPOs after VMWare deployment.
-# LAST EDIT: 11/07/2025
+# LAST EDIT: 14/07/2025
 
 Write-Host "Welcome to the New-ServerDeployment script!" -ForegroundColor Cyan
 Write-Host "This script will help you create the necessary AD groups/OUs for new servers or services." -ForegroundColor Cyan
@@ -154,7 +154,8 @@ if ($ExistingOUs) {
     }
     elseif ($ouIndex -match '^\d+$' -and [int]$ouIndex -ge 0 -and [int]$ouIndex -lt $ouList.Count) {
         $ServiceOU = $ouList[$ouIndex].DistinguishedName
-        Write-Host "You have selected to use an existing OU: $ServiceOU" -ForegroundColor Green
+        $ServiceOUName = $ouList[$ouIndex].Name
+        Write-Host "You have selected to use an existing OU: $ServiceOUName" -ForegroundColor Green
         $LiveSecurityGroupsOU = "OU=Security Groups,OU=LIVE,$ServiceOU"
         $TestSecurityGroupsOU = "OU=Security Groups,OU=TEST,$ServiceOU"
     }
@@ -194,12 +195,15 @@ foreach ($ServerName in $ServerNamesArray) {
         Write-Host "Created LogOnAsService group for $ServerName" -ForegroundColor Green
 
         Write-Host "Adding backup_user to LogOnAsService group for $ServerName..." -ForegroundColor Yellow
+        Write-Host "Adding SVC_NESSUS_SCAN to LogOnAsService group for $ServerName..." -ForegroundColor Yellow
 
         try {
             Add-ADGroupMember -Identity "$ServerName - LogOnAsService" -Members "backup_user"
             Write-Host "Added backup_user to LogOnAsService group for $ServerName" -ForegroundColor Green
+            Add-ADGroupMember -Identity "$ServerName - LogOnAsService" -Members "SVC_NESSUS_SCAN"
+            Write-Host "Added SVC_NESSUS_SCAN to LogOnAsService group for $ServerName" -ForegroundColor Green
         } catch {
-            Write-Host "Failed to add backup_user to LogOnAsService group for ${ServerName}: $_" -ForegroundColor Red
+            Write-Host "Failed to add backup_user or SVC_NESSUS_SCAN to LogOnAsService group for ${ServerName}: $_" -ForegroundColor Red
         }
     }
     elseif ($ServerName -like "*VVL*") {
@@ -214,12 +218,15 @@ foreach ($ServerName in $ServerNamesArray) {
         Write-Host "Created LogOnAsService group for $ServerName" -ForegroundColor Green
 
         Write-Host "Adding backup_user to LogOnAsService group for $ServerName..." -ForegroundColor Yellow
+        Write-Host "Adding SVC_NESSUS_SCAN to LogOnAsService group for $ServerName..." -ForegroundColor Yellow
 
         try {
             Add-ADGroupMember -Identity "$ServerName - LogOnAsService" -Members "backup_user"
             Write-Host "Added backup_user to LogOnAsService group for $ServerName" -ForegroundColor Green
+            Add-ADGroupMember -Identity "$ServerName - LogOnAsService" -Members "SVC_NESSUS_SCAN"
+            Write-Host "Added SVC_NESSUS_SCAN to LogOnAsService group for $ServerName" -ForegroundColor Green
         } catch {
-            Write-Host "Failed to add backup_user to LogOnAsService group for ${ServerName}: $_" -ForegroundColor Red
+            Write-Host "Failed to add backup_user or SVC_NESSUS_SCAN to LogOnAsService group for ${ServerName}: $_" -ForegroundColor Red
         }
     }
 }
@@ -268,16 +275,16 @@ foreach ($ServerName in $ServerNamesArray) {
     }
 
     # Check if the GPO already exists
-    $GPOName = "$ADServiceOU - $ServerName - LogOnAsService"
+    $GPOName = "$ServiceOUName - $ServerName - LogOnAsService"
     $ExistingGPO = Get-GPO -Name $GPOName -ErrorAction SilentlyContinue
     if ($ExistingGPO) {
         Write-Host "GPO '$GPOName' already exists." -ForegroundColor Yellow
     } else {
         # Create the new GPO
-        if ($CreateNewOU = 'Y') {
+        if ($CreateNewOU -eq 'Y') {
             $GPOName = "$NewOUName - $ServerName - LogOnAsService"
         } else {
-            $GPOName = "$ADServiceOU - $ServerName - LogOnAsService"
+            $GPOName = "$ServiceOUName - $ServerName - LogOnAsService"
         }
 
         Write-Host "Creating GPO: $GPOName" -ForegroundColor Yellow
@@ -288,7 +295,7 @@ foreach ($ServerName in $ServerNamesArray) {
         Write-Host "If a new AD OU was created, please wait for the new AD OU to propagate to GPMC...Please allow a few mins..." -ForegroundColor Yellow
 
         # Wait for the OU to be available in GPMC
-        $MaxAttempts= 15
+        $MaxAttempts= 25
         $Delay = 60
         $Success = $false
 
