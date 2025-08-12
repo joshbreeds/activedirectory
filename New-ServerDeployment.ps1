@@ -1,12 +1,18 @@
-# NAME: New-ADServerGroups.ps1
+# NAME: New-ServerDeployment.ps1
 # AUTHOR: Joshua Breeds - 03/07/2025
 # SYNOPSIS: Creates new service OUs/server AD security groups and LogOnAsService GPOs after VMWare deployment.
-# LAST EDIT: 14/07/2025
+# LAST EDIT: 12/08/2025
+
+### Import Modules ###
+Import-Module ActiveDirectory
+Import-Module GroupPolicy
+
+### Welcome Messages ###
 
 Write-Host "Welcome to the New-ServerDeployment script!" -ForegroundColor Cyan
 Write-Host "This script will help you create the necessary AD groups/OUs for new servers or services." -ForegroundColor Cyan
 
-# Check the server has been deployed
+### Check the server has been deployed ###
 $ServerCheck = Read-Host "Have the new server(s) been deployed and ran the post install configuration in VMware? (Y/N)"
 if ($ServerCheck -eq 'Y') {
     Write-Host "You have confirmed that the server(s) have been deployed." -ForegroundColor Green
@@ -39,7 +45,7 @@ if ($CMDBCheck -eq 'Y') {
     exit
 }
 
-# Search AD for the OU of the service
+### Search AD for the OU of the service ###
 $ADServiceOU = Read-Host "What is the name of the service that your server(s) are running? (Example: CROWN DMS, NICHE etc)"
 $BaseOU = "OU=Servers,OU=Northumbria Police,OU=Data Management,DC=nbria,DC=police,DC=cjx,DC=gov,DC=uk"
 
@@ -59,6 +65,9 @@ if ($ExistingOUs) {
         $ServiceOU = "OU=$NewOUName,$BaseOU"
 
         Write-Host "Building new OU structure..." -ForegroundColor Yellow
+        # Sleep to allow a natural pause for user to read
+        Start-Sleep -Seconds 3
+        # Create the new OU structure
         New-ADOrganizationalUnit -Name $NewOUName -Path $BaseOU
         Write-Host "Created OU: $NewOUName" -ForegroundColor Green
         New-ADOrganizationalUnit -Name "LIVE" -Path $ServiceOU
@@ -69,6 +78,9 @@ if ($ExistingOUs) {
         Write-Host "Created Service Accounts sub-OU under $NewOUName" -ForegroundColor Green
         New-ADGroup -Name "$NewOUName - OU Admins" -GroupScope Global -Path $ServiceOU -Description "Users in this group are SMEs for the service and have delegated control rights for this OU and linked GPOs -$TicketNumber"
         Write-Host "Created OU Admins group for $NewOUName" -ForegroundColor Green
+
+        # Sleep to allow a natural pause for user to read
+        Start-Sleep -Seconds 3
 
         # Prompt for SME admin accounts (comma-separated)
         $SMEAdmins = Read-Host "Enter the username(s) (sAMAccountName) of the SME admin(s) to add to the OU Admins group (comma-separated, or leave blank to skip)"
@@ -92,6 +104,9 @@ if ($ExistingOUs) {
         Write-Host "Created Security Groups sub-OU under TEST in $NewOUName" -ForegroundColor Green
         Write-Host "All required OUs and groups have been created successfully." -ForegroundColor Green
 
+        # Sleep to allow a natural pause for user to read
+        Start-Sleep -Seconds 3
+
         $LiveSecurityGroupsOU = "OU=Security Groups,OU=LIVE,$ServiceOU"
         $TestSecurityGroupsOU = "OU=Security Groups,OU=TEST,$ServiceOU"
     } else {
@@ -100,7 +115,7 @@ if ($ExistingOUs) {
     }
 }
 
-# Let user select by number, not by typing the DN
+### Let user select OU by number, not by typing the DN ###
 if ($ExistingOUs) {
     # Force $ouList to be an array
     $ouList = @($ExistingOUs | Select-Object -Property Name, DistinguishedName)
@@ -109,7 +124,7 @@ if ($ExistingOUs) {
     }
     $ouIndex = Read-Host "Enter the number of the OU you want to use, or type 'New' to create a new OU"
     if ($ouIndex -eq 'New') {
-        # Creating a new OU structure
+        ### Creating a new OU structure ###
         Write-Host "Ok, let's create a new OU and sub OUs for this service..." -ForegroundColor Yellow
         $NewOUName = Read-Host "What is the name of the new OU for this service/application?"
         $ServiceOU = "OU=$NewOUName,$BaseOU"
@@ -126,8 +141,10 @@ if ($ExistingOUs) {
         New-ADGroup -Name "$NewOUName - OU Admins" -GroupScope Global -Path $ServiceOU -Description "Users in this group are SMEs for the service and have delegated control rights for this OU and linked GPOs -$TicketNumber"
         Write-Host "Created OU Admins group for $NewOUName" -ForegroundColor Green
 
-        
-        # Prompt for SME admin accounts (comma-separated)
+        # Sleep to allow a natural pause for user to read
+        Start-Sleep -Seconds 3
+
+        ### Prompt for SME admin accounts (comma-separated) ###
         $SMEAdmins = Read-Host "Enter the username(s) (sAMAccountName) of the SME admin(s) to add to the OU Admins group (comma-separated, or leave blank to skip)"
         if ($SMEAdmins) {
             $SMEAdminArray = $SMEAdmins -split ',\s*'
@@ -139,6 +156,10 @@ if ($ExistingOUs) {
             }
         }
 
+        # Sleep to allow a natural pause for user to read
+        Start-Sleep -Seconds 3
+
+        ### Create sub-OUs ###
         New-ADOrganizationalUnit -Name "Servers" -Path "OU=LIVE,$ServiceOU"
         Write-Host "Created Servers sub-OU under LIVE in $NewOUName" -ForegroundColor Green
         New-ADOrganizationalUnit -Name "Servers" -Path "OU=TEST,$ServiceOU"
@@ -165,11 +186,14 @@ if ($ExistingOUs) {
     }
 }
 
-# Prompt for server names
+# Sleep to allow a natural pause for user to read
+Start-Sleep -Seconds 3
+
+### Prompt for server names ###
 $ServerNames = Read-Host "What are the hostnames of the new servers you are deploying? (Example: Server1, Server2, Server3) - Separate multiple servers with a comma."
 $ServerNamesArray = $ServerNames -split ',\s*'
 
-# Validate server names
+### Validate server names ###
 $ServerNamesCheck = Read-Host "You have entered the following server names: $ServerNamesArray. Are these correct and free from typos? [Y/N]"
 if ($ServerNamesCheck -eq 'N') {
     Write-Host "Please re-run the script and enter the correct server names." -ForegroundColor Red
@@ -180,61 +204,85 @@ if ($ServerNamesCheck -eq 'N') {
 } else {
     Write-Host "You have confirmed that the server names are correct." -ForegroundColor Green
 }
-# Create groups for each server
+
+# Sleep to allow a natural pause for user to read
+Start-Sleep -Seconds 3
+
+### Create groups for each server ###
 Write-Host "Creating AD groups for each server..." -ForegroundColor Yellow
 foreach ($ServerName in $ServerNamesArray) {
     if ($ServerName -like "*VVD*" -or $ServerName -like "*VVT*") {
         # TEST
         New-ADGroup -Name "$ServerName - RDP Users" -GroupScope Global -Path $TestSecurityGroupsOU -Description "Users in this group have RDP access to $ServerName - $TicketNumber"
         Write-Host "Created RDP Users group for $ServerName" -ForegroundColor Green
-
         New-ADGroup -Name "$ServerName - Server Admins" -GroupScope Global -Path $TestSecurityGroupsOU -Description "Users in this group are server admins for $ServerName - $TicketNumber"
         Write-Host "Created Server Admins group for $ServerName" -ForegroundColor Green
-
         New-ADGroup -Name "$ServerName - LogOnAsService" -GroupScope Global -Path $TestSecurityGroupsOU -Description "Users in this group have LogOnAsService rights for $ServerName - $TicketNumber"
         Write-Host "Created LogOnAsService group for $ServerName" -ForegroundColor Green
-
+        # Sleep to allow a natural pause for user to read
+        Start-Sleep -Seconds 2
+        ### Add backup_user and SVC_NESSUS_SCAN to LogOnAsService group, and backup_user to Server Admins group ###
         Write-Host "Adding backup_user to LogOnAsService group for $ServerName..." -ForegroundColor Yellow
         Write-Host "Adding SVC_NESSUS_SCAN to LogOnAsService group for $ServerName..." -ForegroundColor Yellow
-
+        Write-Host "Adding backup_user to Server Admins group for $ServerName..." -ForegroundColor Yellow
+        # Sleep to allow a natural pause for user to read
+        Start-Sleep -Seconds 2
         try {
             Add-ADGroupMember -Identity "$ServerName - LogOnAsService" -Members "backup_user"
             Write-Host "Added backup_user to LogOnAsService group for $ServerName" -ForegroundColor Green
             Add-ADGroupMember -Identity "$ServerName - LogOnAsService" -Members "SVC_NESSUS_SCAN"
             Write-Host "Added SVC_NESSUS_SCAN to LogOnAsService group for $ServerName" -ForegroundColor Green
+            Add-ADGroupMember -Identity "$ServerName - Server Admins" -Members "backup_user"
+            Write-Host "Added backup_user to Server Admins group for $ServerName" -ForegroundColor Green
+            # Sleep to allow a natural pause for user to read
+            Start-Sleep -Seconds 2
         } catch {
-            Write-Host "Failed to add backup_user or SVC_NESSUS_SCAN to LogOnAsService group for ${ServerName}: $_" -ForegroundColor Red
+            Write-Host "Failed to add backup_user or SVC_NESSUS_SCAN to LogOnAsService group, or backup_user to Server Admins group for ${ServerName}: $_" -ForegroundColor Red
+            # Sleep to allow a natural pause for user to read
+            Start-Sleep -Seconds 2
         }
     }
     elseif ($ServerName -like "*VVL*") {
         # LIVE
         New-ADGroup -Name "$ServerName - RDP Users" -GroupScope Global -Path $LiveSecurityGroupsOU -Description "Users in this group have RDP access to $ServerName - $TicketNumber"
         Write-Host "Created RDP Users group for $ServerName" -ForegroundColor Green
-
         New-ADGroup -Name "$ServerName - Server Admins" -GroupScope Global -Path $LiveSecurityGroupsOU -Description "Users in this group are server admins for $ServerName - $TicketNumber"
         Write-Host "Created Server Admins group for $ServerName" -ForegroundColor Green
-
         New-ADGroup -Name "$ServerName - LogOnAsService" -GroupScope Global -Path $LiveSecurityGroupsOU -Description "Users in this group have LogOnAsService rights for $ServerName - $TicketNumber"
         Write-Host "Created LogOnAsService group for $ServerName" -ForegroundColor Green
-
+        # Sleep to allow a natural pause for user to read
+        Start-Sleep -Seconds 2
+        ### Add backup_user and SVC_NESSUS_SCAN to LogOnAsService group, and backup_user to Server Admins group ###
         Write-Host "Adding backup_user to LogOnAsService group for $ServerName..." -ForegroundColor Yellow
         Write-Host "Adding SVC_NESSUS_SCAN to LogOnAsService group for $ServerName..." -ForegroundColor Yellow
-
+        Write-Host "Adding backup_user to Server Admins group for $ServerName..." -ForegroundColor Yellow
+        # Sleep to allow a natural pause for user to read
+        Start-Sleep -Seconds 2
         try {
             Add-ADGroupMember -Identity "$ServerName - LogOnAsService" -Members "backup_user"
             Write-Host "Added backup_user to LogOnAsService group for $ServerName" -ForegroundColor Green
             Add-ADGroupMember -Identity "$ServerName - LogOnAsService" -Members "SVC_NESSUS_SCAN"
             Write-Host "Added SVC_NESSUS_SCAN to LogOnAsService group for $ServerName" -ForegroundColor Green
+            Add-ADGroupMember -Identity "$ServerName - Server Admins" -Members "backup_user"
+            Write-Host "Added backup_user to Server Admins group for $ServerName" -ForegroundColor Green
+            # Sleep to allow a natural pause for user to read
+            Start-Sleep -Seconds 2
         } catch {
-            Write-Host "Failed to add backup_user or SVC_NESSUS_SCAN to LogOnAsService group for ${ServerName}: $_" -ForegroundColor Red
+            Write-Host "Failed to add backup_user or SVC_NESSUS_SCAN to LogOnAsService, or backup_user to Server Admins group for ${ServerName}: $_" -ForegroundColor Red
+            # Sleep to allow a natural pause for user to read
+            Start-Sleep -Seconds 2
         }
     }
 }
 
 Write-Host "All groups and OUs have been created successfully." -ForegroundColor Green
+# Sleep to allow a natural pause for user to read
+Start-Sleep -Seconds 3
 
-# Move AD Computer objects to the correct OUs
+### Move AD Computer objects to the correct OUs ###
 Write-Host "Moving new AD Computer objects to the new/current OUs..." -ForegroundColor Yellow
+# Sleep to allow a natural pause for user to read
+Start-Sleep -Seconds 3
 
 foreach ($ServerName in $ServerNamesArray) {
     $ComputerObject = Get-ADComputer -Filter "Name -eq '$ServerName'" -ErrorAction SilentlyContinue
@@ -255,14 +303,58 @@ foreach ($ServerName in $ServerNamesArray) {
 }
 
 Write-Host "All groups and any necessary OUs have been created successfully, the computer(s) have been moved to the correct OU." -ForegroundColor Green
+# Sleep to allow a natural pause for user to read
+Start-Sleep -Seconds 3
 
-# Create GPOs for each server
+### Enable RDP on each server ###
+Write-Host "Enabling Remote Desktop Protocol (RDP) on each server..." -ForegroundColor Yellow
+
+# Sleep to allow a natural pause for user to read
+Start-Sleep -Seconds 3
+
+# Enable RDP remotely
+foreach ($ServerName in $ServerNamesArray){
+    Invoke-Command -ComputerName $ServerName -ScriptBlock {
+    $regPathTS = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server"
+    $regPathRdpTcp = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
+    Set-ItemProperty -Path $regPathTS -Name "fDenyTSConnections" -Value 0
+    Set-ItemProperty -Path $regPathRdpTcp -Name "UserAuthentication" -Value 1
+    Write-Host "Remote Desktop enabled on servers" -ForegroundColor Green
+    }
+}
+
+### Assign Server Admins and RDPUsers AD group for each server to local groups on each server ###
+
+# Sleep to allow a natural pause for user to read
+Start-Sleep -Seconds 3
+
+# Add AD groups to local groups on server remotely
+$RDPUsersGroup = "$ServerName - RDP Users"
+$ServerAdminsGroup = "$ServerName - Server Admins"
+
+foreach ($ServerName in $ServerNamesArray) {
+Invoke-Command -ComputerName $ServerName -ScriptBlock {
+    param($RDPUsersGroup, $ServerAdminsGroup)
+    Write-Host "Adding AD groups to local groups on servers..." -ForegroundColor Yellow
+    # Add RDP Users group to Remote Desktop Users local group
+    Add-LocalGroupMember -Group "Remote Desktop Users" -Member $RDPUsersGroup
+    # Add Server Admins group to Administrators local group
+    Add-LocalGroupMember -Group "Administrators" -Member $ServerAdminsGroup
+} -ArgumentList $RDPUsersGroup, $ServerAdminsGroup
+}
+
+Write-Host "Finished assigning Server Admins and RDPUsers AD groups to local groups" -ForegroundColor Green
+
+### Create LogOnAsService GPOs for each server ###
 Write-Host "Creating LogOnAsService GPOs for each server..." -ForegroundColor Yellow
+# Sleep to allow a natural pause for user to read
+Start-Sleep -Seconds 3
+
 $TargetOU = "OU=Servers,$ServiceOU"
 $ServerNames = $ServerNamesArray -join ', '                 
 Import-Module GroupPolicy
 
-# Creates GPOs for each server
+### Creates GPOs for each server ###
 foreach ($ServerName in $ServerNamesArray) {
     # Determine the OU based on server name
     if ($ServerName -like "*VVD*" -or $ServerName -like "*VVT*") {
@@ -291,7 +383,10 @@ foreach ($ServerName in $ServerNamesArray) {
         $NewGPO = New-GPO -Name $GPOName -Comment "LogOnAsService GPO for $ServerName - $TicketNumber"
         Write-Host "Created GPO: $GPOName" -ForegroundColor Green
 
-        #Wait for GPO creation to propagate
+        # SLeep to allow a natural pause for user to read
+        Start-Sleep -Seconds 3
+
+        ### Wait for GPO creation to propagate ###
         Write-Host "If a new AD OU was created, please wait for the new AD OU to propagate to GPMC...Please allow a few mins..." -ForegroundColor Yellow
 
         # Wait for the OU to be available in GPMC
@@ -316,7 +411,7 @@ foreach ($ServerName in $ServerNamesArray) {
             Write-Host "Failed to link GPO '$GPOName' to OU '$TargetOU' after $MaxAttempts attempts. Proceeding anyway, GPOs may not be linked correctly." -ForegroundColor Red
         }
 
-        # Set security filtering to allow only the server AD object and remove Authenticated Users
+        # Set security filtering to allow only the server AD object and remove Authenticated Users #
         $ComputerObj = Get-ADComputer -Identity $ServerName -ErrorAction SilentlyContinue
         Set-GPPermission -Guid $NewGPO.Id -PermissionLevel None -TargetType Group -TargetName "Authenticated Users"
         Set-GPPermission -Name $GPOName -TargetName "$($ComputerObj.Name)$" -TargetType Computer -PermissionLevel GpoApply
@@ -324,10 +419,12 @@ foreach ($ServerName in $ServerNamesArray) {
     }
 }
 
-# Final messages
+# Sleep to allow a natural pause for user to read
+Start-Sleep -Seconds 4
+
+### Final messages ###
 Write-Host "All GPOs have been created, security filtered and linked successfully." -ForegroundColor Green
-Write-Host "Please ensure you configure user rights assignment on the new GPOs with the Group Police Management Console." -ForegroundColor Yellow
-Write-Host "Don't forget to assign AD RDPUsers and ServerAdmins group to their respective local groups!" -ForegroundColor Yellow
+Write-Host "Please ensure you configure user rights assignment on the new GPOs with the Group Policy Management Console." -ForegroundColor Yellow
 Write-Host "Thank you for using the New-ServerDeployment script!" -ForegroundColor Cyan
 
 
